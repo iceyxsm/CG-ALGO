@@ -12,9 +12,10 @@ look-ahead, no inflated statistics, no volatility confound) and pessimistic
       data.py       OHLCV loading and a synthetic generator for testing
       features.py   candle geometry + trailing volatility normalization
       labeling.py   triple-barrier labels with timeout and conservative tie-break
-      dataset.py    windowing, non-overlapping sampling, temporal splits
+      dataset.py    windowing, non-overlapping sampling, embargoed temporal splits
       metrics.py    breakeven win-rate and cost-adjusted expectancy
       baseline.py   LightGBM baseline
+      evaluation.py isotonic calibration + cross-asset transfer matrix
     train.ipynb     orchestrates the full pipeline
     requirements.txt
 
@@ -46,13 +47,30 @@ These map one to one to the methodology risks identified before building.
    feature at time t never sees candle t or the future.
 7. Conservative tie-break. When both barriers fall in one candle, the loss is
    assumed first, biasing results pessimistic.
-8. Strict temporal splits. Train, validation, and test are ordered in time and
-   never shuffled; a held-out asset provides the cross-asset test.
+8. Strict temporal splits with purge and embargo. Train, validation, and test
+   are ordered in time and never shuffled. An embargo of horizon + window
+   candles is trimmed at each seam so no earlier sample's label-resolution
+   candles appear inside a later split's input window; non-overlap alone does
+   not cover this cross-boundary leak. A held-out asset provides the
+   cross-asset test.
 9. Cost-adjusted expectancy. The no-skill breakeven win-rate is sl/(tp+sl) plus
    costs; success is beating that hurdle, not 50 percent.
-10. Baseline first. LightGBM sets the bar. A deeper model (1D-CNN, LSTM, then a
-    small transformer with optional masked-candle pretraining) is only worth it
-    if it beats this baseline.
+10. Calibrated thresholds, selected out-of-sample. Win probabilities are
+    isotonic-calibrated on the validation split and frozen before test, and the
+    trade threshold defaults to the cost-adjusted breakeven. Thresholds are
+    never tuned on test, which is the most common way this experiment fools its
+    author.
+11. Transfer matrix as referee. The within-asset diagonal is the performance
+    ceiling; the gap to off-diagonal and pooled cells is the generalization tax
+    that separates a market language from an asset dialect. Frozen deployment
+    (train early, test later on unseen assets, no retraining) is just a cell
+    where train and target assets differ.
+12. Baseline first, but as a diagnostic, not a gate. LightGBM flattens the
+    window and cannot represent translation-invariant motifs, so a tree winning
+    is informative but a tree losing is not evidence of no edge. The ladder
+    (LightGBM, then 1D-CNN for local motifs, then a transformer for long-range
+    structure, with optional masked-candle pretraining) has each rung test a
+    distinct claim about what carries the signal.
 
 ## Caveats
 

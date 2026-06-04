@@ -21,6 +21,11 @@ class SplitConfig:
     non_overlap: bool = True
 
 
+def embargo_for(bar_cfg, split_cfg):
+    """Candles to embargo at each split seam: label horizon + input window."""
+    return bar_cfg.horizon + split_cfg.window
+
+
 def build_dataset(df, feat_cfg=FeatureConfig(), bar_cfg=BarrierConfig(),
                   split_cfg=SplitConfig()):
     """Build a flattened feature matrix X, labels y, and entry indices.
@@ -53,10 +58,25 @@ def build_dataset(df, feat_cfg=FeatureConfig(), bar_cfg=BarrierConfig(),
     return np.asarray(X), np.asarray(y), np.asarray(idx)
 
 
-def temporal_split(X, y, idx, train=0.7, val=0.15):
-    """Split arrays by position into train/val/test without shuffling."""
+def temporal_split(X, y, idx, train=0.7, val=0.15, embargo=0):
+    """Split arrays by position into train/val/test without shuffling.
+
+    Purge + embargo: a sample's label can resolve up to `horizon` candles after
+    its entry, and the next split's inputs reach back `window` candles. With
+    embargo = horizon + window, the earlier split's tail is trimmed so no
+    training/validation sample's label-resolution candles ever appear inside a
+    later split's input window. This closes the cross-boundary leak that
+    non-overlapping sampling alone does not cover.
+    """
     n = len(X)
     a = int(n * train)
     b = int(n * (train + val))
-    sl = lambda lo, hi: (X[lo:hi], y[lo:hi], idx[lo:hi])
-    return {"train": sl(0, a), "val": sl(a, b), "test": sl(b, n)}
+
+    def trim(lo, hi, nxt):
+        while hi > lo and nxt < n and idx[hi - 1] + embargo >= idx[nxt]:
+            hi -= 1
+        return slice(lo, hi)
+
+    g = lambda s: (X[s], y[s], idx[s])
+    return {"train": g(trim(0, a, a)), "val": g(trim(a, b, b)),
+            "test": g(slice(b, n))}
