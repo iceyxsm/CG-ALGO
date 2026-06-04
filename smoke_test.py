@@ -53,7 +53,9 @@ assets = {"A": generate_synthetic_ohlcv(60000, 0, vol=0.002),
           "B": generate_synthetic_ohlcv(60000, 1, vol=0.006)}
 cells = [(["A"], "A"), (["A"], "B"), (["B"], "A"), (["A", "B"], "B")]
 for r in transfer_matrix(assets, cells, feat_cfg, bar_cfg, split_cfg):
+    assert r["exp_ci_lo"] <= r["expectancy"] <= r["exp_ci_hi"] or r["n_taken"] == 0
     print(f"  train={r['train']:>3} test={r['test']} "
           f"within={r['within_asset']} n_taken={r['n_taken']} "
-          f"expectancy={r['expectancy']:.5f}")
+          f"expectancy={r['expectancy']:.5f} "
+          f"ci=[{r['exp_ci_lo']:.5f},{r['exp_ci_hi']:.5f}]")
 print("OK")
