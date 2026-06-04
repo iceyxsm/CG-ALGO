@@ -9,7 +9,7 @@ look-ahead, no inflated statistics, no volatility confound) and pessimistic
 ## Layout
 
     mlm/
-      data.py       OHLCV loading and a synthetic generator for testing
+      data.py       OHLCV loading
       features.py   candle geometry + trailing volatility normalization
       labeling.py   triple-barrier labels with timeout and conservative tie-break
       dataset.py    windowing, non-overlapping sampling, embargoed temporal splits
@@ -23,9 +23,9 @@ look-ahead, no inflated statistics, no volatility confound) and pessimistic
 
     pip install -r requirements.txt
 
-Then open `train.ipynb`. To use real data, replace `generate_synthetic_ohlcv`
-with `load_ohlcv_csv('btc_5m.csv')`. The CSV needs columns open, high, low,
-close (oldest first); use `column_map` to rename if needed.
+Then fetch data (below) and open `train.ipynb`. Load any CSV with columns
+open, high, low, close (oldest first) via `load_ohlcv_csv('btcusdt_5m.csv')`;
+use `column_map` to rename columns if needed.
 
 ## Getting data
 
@@ -85,8 +85,9 @@ These map one to one to the methodology risks identified before building.
 
 ## Caveats
 
-The synthetic generator is a random walk with no learnable edge; it exists only
-to prove the pipeline runs and to confirm expectancy lands near zero (a check
-that nothing is leaking). Conclusions require real OHLCV history. Single OHLC
-bars cannot resolve intrabar touch order, which is why the tie-break is
-conservative; minute data can refine this later.
+Single OHLC bars cannot resolve intrabar touch order, which is why the tie-break
+is conservative; minute data can refine this later. Stage one of the experiment
+measures predictive skill (AUC, log-loss) to ask whether the normalized geometry
+carries learnable, transferable structure; the cost-adjusted expectancy and any
+leverage or position-sizing belong to a later strategy stage and do not gate the
+representation question.
