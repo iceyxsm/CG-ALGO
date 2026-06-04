@@ -15,37 +15,57 @@ import csv
 import json
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 INTERVAL_MS = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000}
 DEFAULT_BASE = "https://data-api.binance.vision"
 
 
+def _get_page(symbol, interval, start, end, base, limit, retries=4):
+    """Fetch one page, retrying with backoff on rate-limit/transient errors."""
+    url = (f"{base}/api/v3/klines?symbol={symbol}&interval={interval}"
+           f"&startTime={start}&endTime={end}&limit={limit}")
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(url, timeout=30) as r:
+                return json.load(r)
+        except Exception:
+            if attempt == retries - 1:
+                raise
+            time.sleep(0.5 * (2 ** attempt))   # exponential backoff
+
+
 def fetch_klines(symbol, interval, start_ms, end_ms, base, limit=1000,
-                 progress=False):
+                 progress=False, workers=20):
+    """Fetch klines in parallel.
+
+    Page start times are arithmetic (limit * interval apart), so every page's
+    window is known up front without waiting for the previous response. That
+    lets the pages download concurrently instead of strictly sequentially,
+    turning a multi-minute pull into a sub-minute one. Workers are capped to
+    stay within Binance's public rate limit, and each page retries with backoff.
+    """
+    span = INTERVAL_MS[interval] * limit
+    starts = list(range(start_ms, end_ms, span))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        results = list(ex.map(
+            lambda s: _get_page(symbol, interval, s, min(s + span, end_ms),
+                                base, limit), starts))
     rows = []
-    t = start_ms
-    page = 0
-    while t < end_ms:
-        url = (f"{base}/api/v3/klines?symbol={symbol}&interval={interval}"
-               f"&startTime={t}&endTime={end_ms}&limit={limit}")
-        with urllib.request.urlopen(url, timeout=30) as r:
-            batch = json.load(r)
-        if not batch:
-            break
-        rows.extend(batch)
-        t = batch[-1][0] + INTERVAL_MS[interval]
-        page += 1
-        # Print full newline-terminated lines (every 20 pages): Colab does not
-        # flush partial lines, so an in-place \r update stays invisible there.
-        if progress and page % 20 == 0:
-            done = (t - start_ms) / max(end_ms - start_ms, 1)
-            last = time.strftime("%Y-%m-%d", time.gmtime(batch[-1][0] / 1000))
-            print(f"  {symbol}: {len(rows):>8,} candles  "
-                  f"{min(done, 1.0) * 100:5.1f}%  up to {last}", flush=True)
-        time.sleep(0.2)   # stay well under the public rate limit
+    for batch in results:
+        if batch:
+            rows.extend(batch)
+    rows.sort(key=lambda k: k[0])
+    # De-duplicate on open time in case page windows overlap at the seams.
+    dedup = []
+    seen = None
+    for k in rows:
+        if k[0] != seen:
+            dedup.append(k)
+            seen = k[0]
     if progress:
-        print(f"  {symbol}: {len(rows):,} candles done", flush=True)
-    return rows
+        print(f"  {symbol}: {len(dedup):,} candles done", flush=True)
+    return dedup
 
 
 def save_csv(rows, path):
