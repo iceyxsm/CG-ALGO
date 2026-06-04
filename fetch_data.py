@@ -43,6 +43,24 @@ def save_csv(rows, path):
             w.writerow([k[0], k[1], k[2], k[3], k[4], k[5]])
 
 
+def fetch_to_csv(symbol, interval="5m", days=3300,
+                 base="https://api.binance.com"):
+    """Fetch one symbol to '{symbol}_{interval}.csv', skipping if it exists.
+
+    Cache-aware so a notebook kernel restart does not re-download. Returns the
+    output path. `days` past the listing date simply fills to the symbol start.
+    """
+    import os
+    out = f"{symbol.lower()}_{interval}.csv"
+    if os.path.exists(out):
+        return out
+    end_ms = int(time.time() * 1000)
+    start_ms = end_ms - days * 86_400_000
+    rows = fetch_klines(symbol, interval, start_ms, end_ms, base)
+    save_csv(rows, out)
+    return out
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--symbols", nargs="+", default=["BTCUSDT"])
@@ -52,12 +70,9 @@ def main():
     args = p.parse_args()
 
     end_ms = int(time.time() * 1000)
-    start_ms = end_ms - args.days * 86_400_000
     for sym in args.symbols:
-        rows = fetch_klines(sym, args.interval, start_ms, end_ms, args.base)
-        out = f"{sym.lower()}_{args.interval}.csv"
-        save_csv(rows, out)
-        print(f"{sym}: {len(rows)} candles -> {out}")
+        out = fetch_to_csv(sym, args.interval, args.days, args.base)
+        print(f"{sym}: -> {out}")
 
 
 if __name__ == "__main__":
