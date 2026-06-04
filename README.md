@@ -27,6 +27,17 @@ Then open `train.ipynb`. To use real data, replace `generate_synthetic_ohlcv`
 with `load_ohlcv_csv('btc_5m.csv')`. The CSV needs columns open, high, low,
 close (oldest first); use `column_map` to rename if needed.
 
+## Getting data
+
+`fetch_data.py` pulls paginated 5-minute history from Binance public klines into
+pipeline-ready CSVs (stdlib only, no extra dependencies):
+
+    python fetch_data.py --symbols BTCUSDT ETHUSDT DOGEUSDT --interval 5m --days 365
+
+Output files like `btcusdt_5m.csv` load directly via `load_ohlcv_csv`. CSVs are
+gitignored on purpose; data does not belong in the repo. If api.binance.com is
+geo-blocked in your region, pass `--base https://data-api.binance.vision`.
+
 ## Design decisions
 
 These map one to one to the methodology risks identified before building.
