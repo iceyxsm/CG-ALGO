@@ -43,7 +43,8 @@ def _to_tensor(X):
     return torch.tensor(np.ascontiguousarray(x), dtype=torch.float32)
 
 
-def train_transformer(train, val, epochs=20, batch=256, lr=5e-4, seed=0):
+def train_transformer(train, val, epochs=20, batch=256, lr=5e-4, seed=0,
+                      verbose=True):
     """Train on WIN-vs-not, early-stopping on validation logloss."""
     torch.manual_seed(seed)
     Xtr, ytr, _ = train
@@ -54,6 +55,9 @@ def train_transformer(train, val, epochs=20, batch=256, lr=5e-4, seed=0):
     yva_b = torch.tensor((yva == WIN).astype(np.float32)).to(_DEVICE)
 
     model = _Transformer(_C).to(_DEVICE)
+    if verbose:
+        print(f"  device={_DEVICE} train={len(xtr):,} val={len(xva):,}",
+              flush=True)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.BCEWithLogitsLoss()
     best, best_state, wait, patience = float("inf"), None, 0, 4
@@ -68,6 +72,9 @@ def train_transformer(train, val, epochs=20, batch=256, lr=5e-4, seed=0):
         model.eval()
         with torch.no_grad():
             vloss = loss_fn(model(xva), yva_b).item()
+        if verbose:
+            print(f"  epoch {ep + 1}/{epochs}  val_logloss {vloss:.4f}",
+                  flush=True)
         if vloss < best - 1e-4:
             best, best_state, wait = vloss, {k: v.clone() for k, v in
                                              model.state_dict().items()}, 0
