@@ -72,7 +72,8 @@ def _stack(splits_list, part):
 
 def transfer_matrix(assets, cells, feat_cfg=FeatureConfig(),
                     bar_cfg=BarrierConfig(), split_cfg=SplitConfig(),
-                    cost_cfg=CostConfig(), calibrate=True):
+                    cost_cfg=CostConfig(), calibrate=True,
+                    fit=train_lightgbm, predict=predict_win_prob):
     """Run a set of train/test cells over named assets.
 
     `assets`: dict name -> OHLCV DataFrame.
@@ -87,14 +88,14 @@ def transfer_matrix(assets, cells, feat_cfg=FeatureConfig(),
     for train_names, test_name in cells:
         tr = _stack([splits[n] for n in train_names], "train")
         va = _stack([splits[n] for n in train_names], "val")
-        model = train_lightgbm(tr, va)
+        model = fit(tr, va)
 
         cal = None
         if calibrate:
-            cal = fit_calibrator(predict_win_prob(model, va[0]), va[1])
+            cal = fit_calibrator(predict(model, va[0]), va[1])
 
         Xte, yte, _ = splits[test_name]["test"]
-        prob = predict_win_prob(model, Xte)
+        prob = predict(model, Xte)
         if cal is not None:
             prob = cal(prob)
         res = evaluate_strategy(yte, prob, bar_cfg.tp, bar_cfg.sl,
