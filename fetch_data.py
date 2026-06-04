@@ -24,6 +24,7 @@ def fetch_klines(symbol, interval, start_ms, end_ms, base, limit=1000,
                  progress=False):
     rows = []
     t = start_ms
+    page = 0
     while t < end_ms:
         url = (f"{base}/api/v3/klines?symbol={symbol}&interval={interval}"
                f"&startTime={t}&endTime={end_ms}&limit={limit}")
@@ -33,14 +34,17 @@ def fetch_klines(symbol, interval, start_ms, end_ms, base, limit=1000,
             break
         rows.extend(batch)
         t = batch[-1][0] + INTERVAL_MS[interval]
-        if progress:
+        page += 1
+        # Print full newline-terminated lines (every 20 pages): Colab does not
+        # flush partial lines, so an in-place \r update stays invisible there.
+        if progress and page % 20 == 0:
             done = (t - start_ms) / max(end_ms - start_ms, 1)
             last = time.strftime("%Y-%m-%d", time.gmtime(batch[-1][0] / 1000))
-            print(f"\r  {symbol}: {len(rows):>8,} candles  "
-                  f"{min(done, 1.0) * 100:5.1f}%  up to {last}", end="", flush=True)
+            print(f"  {symbol}: {len(rows):>8,} candles  "
+                  f"{min(done, 1.0) * 100:5.1f}%  up to {last}", flush=True)
         time.sleep(0.2)   # stay well under the public rate limit
     if progress:
-        print()
+        print(f"  {symbol}: {len(rows):,} candles done", flush=True)
     return rows
 
 
