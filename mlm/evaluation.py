@@ -18,7 +18,7 @@ import numpy as np
 
 from .dataset import build_dataset, temporal_split, embargo_for, SplitConfig
 from .features import FeatureConfig
-from .labeling import BarrierConfig, WIN
+from .labeling import BarrierConfig, WIN, LOSS
 from .baseline import train_lightgbm, predict_win_prob
 from .metrics import evaluate_strategy, CostConfig
 
@@ -70,31 +70,72 @@ def _stack(splits_list, part):
             np.concatenate([p[2] for p in parts]))
 
 
+def _auc(y, p):
+    """Mann-Whitney AUC; nan if only one class present."""
+    n_pos, n_neg = int(y.sum()), int((1 - y).sum())
+    if n_pos == 0 or n_neg == 0:
+        return float("nan")
+    order = np.argsort(p, kind="mergesort")
+    ranks = np.empty(len(p)); ranks[order] = np.arange(1, len(p) + 1)
+    return (ranks[y == 1].sum() - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
+
+
 def skill(y_true, win_prob, eps=1e-12):
     """Predictive skill on every test sample, independent of any trade rule.
 
-    Answers "did the model learn structure" rather than "is it profitable":
-      auc       rank of wins above losses (0.5 = no skill); via Mann-Whitney.
-      log_loss  mean negative log-likelihood of the WIN/not labels.
-      base_log_loss  entropy of the class prior; log_loss below it means the
-                probabilities carry information beyond the base rate.
-    TIMEOUT folds into not-WIN so the target matches the binary models.
+    auc       WIN vs (LOSS+TIMEOUT). Inflated by volatility, since whether any
+              barrier is touched depends on it, so read dir_auc alongside.
+    dir_auc   WIN vs LOSS with TIMEOUT dropped: pure directional skill, the
+              honest test of whether geometry predicts which barrier hits first.
+    log_loss / base_log_loss  information beyond the class prior.
     """
-    y = (np.asarray(y_true) == WIN).astype(int)
+    yt = np.asarray(y_true)
+    y = (yt == WIN).astype(int)
     p = np.clip(np.asarray(win_prob, dtype=float), eps, 1 - eps)
-    n_pos, n_neg = int(y.sum()), int((1 - y).sum())
-    if n_pos == 0 or n_neg == 0:
-        auc = float("nan")
-    else:
-        order = np.argsort(p, kind="mergesort")
-        ranks = np.empty(len(p)); ranks[order] = np.arange(1, len(p) + 1)
-        auc = (ranks[y == 1].sum() - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
+    auc = _auc(y, p)
+    resolved = (yt == WIN) | (yt == LOSS)
+    dir_auc = _auc((yt[resolved] == WIN).astype(int), p[resolved]) \
+        if resolved.any() else float("nan")
     ll = float(-(y * np.log(p) + (1 - y) * np.log(1 - p)).mean())
-    base = n_pos / len(y) if len(y) else 0.0
+    base = y.sum() / len(y) if len(y) else 0.0
     base_ll = float(-(base * np.log(base) + (1 - base) * np.log(1 - base))) \
         if 0 < base < 1 else 0.0
-    return {"auc": float(auc), "log_loss": ll,
+    return {"auc": float(auc), "dir_auc": float(dir_auc),
+            "n_resolved": int(resolved.sum()), "log_loss": ll,
             "base_log_loss": base_ll, "n_test": int(len(y))}
+
+
+def walk_forward(df, n_folds=5, feat_cfg=FeatureConfig(), bar_cfg=BarrierConfig(),
+                 split_cfg=SplitConfig(), fit=train_lightgbm,
+                 predict=predict_win_prob):
+    """Directional skill across sequential time folds on one asset.
+
+    The full sample sequence is cut into n_folds ordered blocks; fold k trains on
+    blocks 0..k-1 and tests on block k, with an embargo trimmed at the seam. A
+    signal that is real should hold across folds, not appear only in one lucky
+    test window. Returns per-fold dir_auc (WIN vs LOSS, TIMEOUT dropped).
+    """
+    X, y, idx = build_dataset(df, feat_cfg, bar_cfg, split_cfg)
+    emb = embargo_for(bar_cfg, split_cfg)
+    bounds = np.linspace(0, len(X), n_folds + 1, dtype=int)
+    out = []
+    for k in range(1, n_folds):
+        tr_hi = bounds[k]
+        # embargo: drop train tail whose labels resolve into the test block
+        while tr_hi > 0 and idx[tr_hi - 1] + emb >= idx[bounds[k]]:
+            tr_hi -= 1
+        tr = (X[:tr_hi], y[:tr_hi], idx[:tr_hi])
+        te_lo, te_hi = bounds[k], bounds[k + 1]
+        va_lo = max(tr_hi - len(X) // 10, 0)
+        va = (X[va_lo:tr_hi], y[va_lo:tr_hi], idx[va_lo:tr_hi])
+        model = fit(tr, va)
+        yte = y[te_lo:te_hi]
+        p = predict(model, X[te_lo:te_hi])
+        m = (yte == WIN) | (yte == LOSS)
+        out.append({"fold": k, "n_resolved": int(m.sum()),
+                    "dir_auc": float(_auc((yte[m] == WIN).astype(int), p[m]))
+                    if m.any() else float("nan")})
+    return out
 
 
 def transfer_matrix(assets, cells, feat_cfg=FeatureConfig(),
