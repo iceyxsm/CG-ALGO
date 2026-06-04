@@ -20,9 +20,9 @@ INTERVAL_MS = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000}
 DEFAULT_BASE = "https://data-api.binance.vision"
 
 
-def fetch_klines(symbol, interval, start_ms, end_ms, base, limit=1000):
+def fetch_klines(symbol, interval, start_ms, end_ms, base, limit=1000,
+                 progress=False):
     rows = []
-    step = INTERVAL_MS[interval] * limit
     t = start_ms
     while t < end_ms:
         url = (f"{base}/api/v3/klines?symbol={symbol}&interval={interval}"
@@ -33,7 +33,14 @@ def fetch_klines(symbol, interval, start_ms, end_ms, base, limit=1000):
             break
         rows.extend(batch)
         t = batch[-1][0] + INTERVAL_MS[interval]
+        if progress:
+            done = (t - start_ms) / max(end_ms - start_ms, 1)
+            last = time.strftime("%Y-%m-%d", time.gmtime(batch[-1][0] / 1000))
+            print(f"\r  {symbol}: {len(rows):>8,} candles  "
+                  f"{min(done, 1.0) * 100:5.1f}%  up to {last}", end="", flush=True)
         time.sleep(0.2)   # stay well under the public rate limit
+    if progress:
+        print()
     return rows
 
 
@@ -54,10 +61,11 @@ def fetch_to_csv(symbol, interval="5m", days=3300, base=DEFAULT_BASE):
     import os
     out = f"{symbol.lower()}_{interval}.csv"
     if os.path.exists(out):
+        print(f"  {symbol}: cached -> {out}")
         return out
     end_ms = int(time.time() * 1000)
     start_ms = end_ms - days * 86_400_000
-    rows = fetch_klines(symbol, interval, start_ms, end_ms, base)
+    rows = fetch_klines(symbol, interval, start_ms, end_ms, base, progress=True)
     save_csv(rows, out)
     return out
 
