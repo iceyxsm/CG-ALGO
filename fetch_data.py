@@ -5,9 +5,10 @@ than just the last 1000 candles. Output columns are open, high, low, close
 (volume kept for later relative-volume experiments), oldest first, which is
 exactly what mlm.data.load_ohlcv_csv consumes.
 
-Note: api.binance.com is geo-restricted in some regions. If it fails, set
---base to a reachable mirror (e.g. https://data-api.binance.vision) which serves
-the same klines endpoint, or point the pipeline at any CSV with these columns.
+Note: api.binance.com returns HTTP 451 from some regions (including the US, and
+therefore Colab). The default base here is data-api.binance.vision, a geo-neutral
+mirror that serves the identical klines endpoint, so it works on hosted notebooks
+out of the box. Pass --base https://api.binance.com if you prefer the main API.
 """
 import argparse
 import csv
@@ -16,6 +17,7 @@ import time
 import urllib.request
 
 INTERVAL_MS = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000}
+DEFAULT_BASE = "https://data-api.binance.vision"
 
 
 def fetch_klines(symbol, interval, start_ms, end_ms, base, limit=1000):
@@ -43,8 +45,7 @@ def save_csv(rows, path):
             w.writerow([k[0], k[1], k[2], k[3], k[4], k[5]])
 
 
-def fetch_to_csv(symbol, interval="5m", days=3300,
-                 base="https://api.binance.com"):
+def fetch_to_csv(symbol, interval="5m", days=3300, base=DEFAULT_BASE):
     """Fetch one symbol to '{symbol}_{interval}.csv', skipping if it exists.
 
     Cache-aware so a notebook kernel restart does not re-download. Returns the
@@ -66,7 +67,7 @@ def main():
     p.add_argument("--symbols", nargs="+", default=["BTCUSDT"])
     p.add_argument("--interval", default="5m", choices=list(INTERVAL_MS))
     p.add_argument("--days", type=int, default=30, help="history length in days")
-    p.add_argument("--base", default="https://api.binance.com")
+    p.add_argument("--base", default=DEFAULT_BASE)
     args = p.parse_args()
 
     end_ms = int(time.time() * 1000)
