@@ -70,6 +70,33 @@ def _stack(splits_list, part):
             np.concatenate([p[2] for p in parts]))
 
 
+def skill(y_true, win_prob, eps=1e-12):
+    """Predictive skill on every test sample, independent of any trade rule.
+
+    Answers "did the model learn structure" rather than "is it profitable":
+      auc       rank of wins above losses (0.5 = no skill); via Mann-Whitney.
+      log_loss  mean negative log-likelihood of the WIN/not labels.
+      base_log_loss  entropy of the class prior; log_loss below it means the
+                probabilities carry information beyond the base rate.
+    TIMEOUT folds into not-WIN so the target matches the binary models.
+    """
+    y = (np.asarray(y_true) == WIN).astype(int)
+    p = np.clip(np.asarray(win_prob, dtype=float), eps, 1 - eps)
+    n_pos, n_neg = int(y.sum()), int((1 - y).sum())
+    if n_pos == 0 or n_neg == 0:
+        auc = float("nan")
+    else:
+        order = np.argsort(p, kind="mergesort")
+        ranks = np.empty(len(p)); ranks[order] = np.arange(1, len(p) + 1)
+        auc = (ranks[y == 1].sum() - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
+    ll = float(-(y * np.log(p) + (1 - y) * np.log(1 - p)).mean())
+    base = n_pos / len(y) if len(y) else 0.0
+    base_ll = float(-(base * np.log(base) + (1 - base) * np.log(1 - base))) \
+        if 0 < base < 1 else 0.0
+    return {"auc": float(auc), "log_loss": ll,
+            "base_log_loss": base_ll, "n_test": int(len(y))}
+
+
 def transfer_matrix(assets, cells, feat_cfg=FeatureConfig(),
                     bar_cfg=BarrierConfig(), split_cfg=SplitConfig(),
                     cost_cfg=CostConfig(), calibrate=True,
@@ -100,6 +127,7 @@ def transfer_matrix(assets, cells, feat_cfg=FeatureConfig(),
             prob = cal(prob)
         res = evaluate_strategy(yte, prob, bar_cfg.tp, bar_cfg.sl,
                                 cost_cfg=cost_cfg)
+        res.update(skill(yte, prob))
         res["train"] = "+".join(train_names)
         res["test"] = test_name
         res["within_asset"] = (train_names == [test_name])
